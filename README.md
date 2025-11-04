@@ -1,6 +1,21 @@
-# Chemistry QLoRA Adapter for Llama-3.2-3B
+---
+base_model: meta-llama/Llama-3.2-3B
+library_name: peft
+pipeline_tag: text-generation
+tags:
+- base_model:adapter:meta-llama/Llama-3.2-3B
+- lora
+- transformers
+language:
+- en
+---
 
+# Model Card for Model ID
+
+<!-- Provide a quick summary of what the model is/does. -->
 This is a PEFT (Parameter Efficient Fine-Tuning) adapter trained on chemistry educational content using QLoRA (Quantized Low-Rank Adaptation) technique. The adapter is designed to enhance Llama-3.2-3B's capabilities in answering chemistry-related questions.
+
+
 
 ## Model Details
 - **Base Model**: meta-llama/Llama-3.2-3B
@@ -8,6 +23,88 @@ This is a PEFT (Parameter Efficient Fine-Tuning) adapter trained on chemistry ed
 - **Domain**: Chemistry Education
 - **Language**: English
 - **License**: Same as base model
+
+### Model Description
+
+This model is a QLoRA fine-tuned version of Meta-Llama-3.2-3B specifically optimized for chemistry question-answering tasks. The adapter layers were trained on a diverse chemistry dataset containing 4.4k+ educational Q&A pairs covering fundamental to advanced chemistry concepts.
+
+
+## Use Cases
+- Answering chemistry concepts and definitions
+- Explaining chemical processes and reactions
+- Solving basic chemistry problems
+- Providing chemistry educational content
+
+
+
+## Example Usage
+Make sure you "pip install transformers peft accelerate torch"
+
+```python
+from transformers import pipeline
+from peft import PeftModel, PeftConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+# Load model with adapter
+base_model = "meta-llama/Llama-3.2-3B"
+adapter_path = "akshatladdha16/Llama-3.2-3B-Chemistry-Tutor-LoRA"
+
+tokenizer = AutoTokenizer.from_pretrained(base_model)
+model = AutoModelForCausalLM.from_pretrained(base_model)
+model = PeftModel.from_pretrained(model, adapter_path)
+
+# Create pipeline
+chemistry_qa_pipeline = pipeline(
+    "text-generation",
+    model=model,
+    tokenizer=tokenizer,
+    torch_dtype=torch.bfloat16,
+    device_map="auto"
+)
+
+# Generate response
+question = "Explain colligative properties with examples."
+prompt = f"""<|start_header_id|>system<|end_header_id|>
+
+You are a chemistry expert. Answer clearly and accurately.<|eot_id|>
+<|start_header_id|>user<|end_header_id|>
+
+{question}<|eot_id|>
+<|start_header_id|>assistant<|end_header_id|>
+
+"""
+
+result = chemistry_qa_pipeline(
+    prompt,
+    max_new_tokens=300,
+    temperature=0.7,
+    do_sample=True,
+    return_full_text=False
+)
+
+print(result[0]['generated_text'])
+```
+
+## Training Setup
+- **Training Type**: QLoRA fine-tuning
+- **Hardware**: 4GB VRAM GPU optimization
+- **Quantization**: 4-bit (NF4 format)
+- **LoRA Configuration**:
+  - Rank: 16
+  - Alpha: 32
+  - Target Modules: ["q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj"]
+  - Dropout: 0.05
+
+### Training Data
+
+The model was fine-tuned on a curated dataset of chemistry educational content, focusing on:
+- Basic chemistry concepts
+- Chemical processes and reactions
+- Problem-solving examples
+- NCERT chemistry curriculum
+  
+[https://huggingface.co/datasets/KadamParth/NCERT_Chemistry_12th]
+
 
 ## Training Setup
 
@@ -59,74 +156,8 @@ This is a PEFT (Parameter Efficient Fine-Tuning) adapter trained on chemistry ed
   - Task Type: CAUSAL_LM
 
 
-## Use Cases
-- Answering chemistry concepts and definitions
-- Explaining chemical processes and reactions
-- Solving basic chemistry problems
-- Providing chemistry educational content
-
-## Example Usage
-```python
-from transformers import AutoTokenizer, AutoModelForCausalLM, BitsAndBytesConfig
-from peft import PeftModel
-import torch
-
-# Quantization configuration
-bnb_config = BitsAndBytesConfig(
-    load_in_4bit=True,
-    bnb_4bit_use_double_quant=True,
-    bnb_4bit_quant_type="nf4",
-    bnb_4bit_compute_dtype=torch.float16
-)
-
-# Load base model with quantization
-base_model = AutoModelForCausalLM.from_pretrained(
-    "meta-llama/Llama-3.2-3B",
-    quantization_config=bnb_config,
-    device_map="auto",
-    torch_dtype=torch.float16,
-    trust_remote_code=True
-)
-
-# Load adapter and tokenizer
-model = PeftModel.from_pretrained(base_model, "YOUR_USERNAME/llama-chemistry-adapter")
-tokenizer = AutoTokenizer.from_pretrained("YOUR_USERNAME/llama-chemistry-adapter")
-
-# Example inference
-def generate_response(prompt, max_length=300):
-    inputs = tokenizer(f"### Chemistry Question: {prompt}\n\n### Answer:", 
-                      return_tensors="pt").to(model.device)
-    
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_length=max_length,
-            temperature=0.7,
-            do_sample=True,
-            top_p=0.9,
-            repetition_penalty=1.1
-        )
-    
-    return tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-# Test examples
-questions = [
-    "What is the definition of molarity?",
-    "Explain chemical equilibrium",
-    "How do you calculate pH?"
-]
-
-for q in questions:
-    print(f"Q: {q}")
-    print(f"A: {generate_response(q)}\n")
-```
-
-## Training Data
-The model was fine-tuned on a curated dataset of chemistry educational content, focusing on:
-- Basic chemistry concepts
-- Chemical processes and reactions
-- Problem-solving examples
-- NCERT chemistry curriculum
+#### Hardware
+NVIDIA RTX 3050 with 4GB VRAM
 
 ## Limitations
 - Limited to chemistry domain knowledge
@@ -138,10 +169,15 @@ The model was fine-tuned on a curated dataset of chemistry educational content, 
 If you use this model, please cite:
 ```bibtex
 @misc{llama-chemistry-adapter,
-  author = {Your Name},
+  author = {Akshat Rai Laddha},
   title = {Chemistry QLoRA Adapter for Llama-3.2-3B},
   year = {2025},
   publisher = {Hugging Face},
   journal = {Hugging Face Model Hub},
 }
 ```
+
+
+### Framework versions
+
+- PEFT 0.17.1
