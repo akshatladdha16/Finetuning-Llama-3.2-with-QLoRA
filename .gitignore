@@ -1,0 +1,5 @@
+.finetuning/
+__pycache__/
+# Model checkpoints and cache
+llama-chemistry-model/
+.env

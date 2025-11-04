@@ -1,0 +1,18 @@
+torch
+torchvision
+torchaudio
+--extra-index-url https://download.pytorch.org/whl/cu118
+
+transformers
+datasets
+accelerate
+peft
+bitsandbytes
+huggingface_hub
+wandb
+tensorboard
+pandas
+numpy
+matplotlib
+tqdm
+ipykernel
