@@ -38,52 +38,7 @@ This model is a QLoRA fine-tuned version of Meta-Llama-3.2-3B specifically optim
 
 
 ## Example Usage
-Make sure you "pip install transformers peft accelerate torch"
-
-```python
-from transformers import pipeline
-from peft import PeftModel, PeftConfig
-from transformers import AutoModelForCausalLM, AutoTokenizer
-
-# Load model with adapter
-base_model = "meta-llama/Llama-3.2-3B"
-adapter_path = "akshatladdha16/Llama-3.2-3B-Chemistry-Tutor-LoRA"
-
-tokenizer = AutoTokenizer.from_pretrained(base_model)
-model = AutoModelForCausalLM.from_pretrained(base_model)
-model = PeftModel.from_pretrained(model, adapter_path)
-
-# Create pipeline
-chemistry_qa_pipeline = pipeline(
-    "text-generation",
-    model=model,
-    tokenizer=tokenizer,
-    torch_dtype=torch.bfloat16,
-    device_map="auto"
-)
-
-# Generate response
-question = "Explain colligative properties with examples."
-prompt = f"""<|start_header_id|>system<|end_header_id|>
-
-You are a chemistry expert. Answer clearly and accurately.<|eot_id|>
-<|start_header_id|>user<|end_header_id|>
-
-{question}<|eot_id|>
-<|start_header_id|>assistant<|end_header_id|>
-
-"""
-
-result = chemistry_qa_pipeline(
-    prompt,
-    max_new_tokens=300,
-    temperature=0.7,
-    do_sample=True,
-    return_full_text=False
-)
-
-print(result[0]['generated_text'])
-```
+You can infer the adapter layers with base model here : [https://colab.research.google.com/drive/16N_lnLKieJjMunvIXb59LtGavifx96nx#scrollTo=nd3kQhZbm2z9]
 
 ## Training Setup
 - **Training Type**: QLoRA fine-tuning
