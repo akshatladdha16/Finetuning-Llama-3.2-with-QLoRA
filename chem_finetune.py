@@ -1,15 +1,15 @@
 import torch
 from datasets import load_dataset
 from transformers import (
-    AutoTokenizer, 
-    AutoModelForCausalLM, 
-    TrainingArguments, 
-    Trainer,
-    BitsAndBytesConfig
+    AutoTokenizer, #for text tokenization and detokenization -> by HF 
+    AutoModelForCausalLM,  #loads the base model for next word pred 
+    TrainingArguments,  #define hyperparams and other training settings by HF
+    Trainer, #Training and eval loops 
+    BitsAndBytesConfig #for quantization settings (4-bit here) by HF -> saves GPU memory, large models get fit into smaller vram
 )
-from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
-from transformers import DataCollatorForLanguageModeling
-import bitsandbytes as bnb
+from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training #parameter efficient fine tuning (only train small subsets of model)
+#get_peft_model -> applies lora to base model , prepare-> get quantized model ready for fientuning without precision errors
+from transformers import DataCollatorForLanguageModeling #dynamic batching and padding during training
 import os
 
 # Set device to GPU and enable memory optimizations
@@ -33,7 +33,7 @@ def load_ncert_chemistry_data():
     with role/content dicts). There is no fallback to external Hugging Face
     datasets — the local file must be present.
     """
-    local_path = os.path.join(os.path.dirname(__file__), "chemistry_finetune.jsonl")
+    local_path = os.path.join(os.path.dirname(__file__), "chemistry_finetune.jsonl") #already preprocessed into chat format for easy finetuning
     if not os.path.exists(local_path):
         raise FileNotFoundError(
             f"Required local dataset not found at {local_path}. Please add the chat-format JSONL file."
@@ -45,12 +45,14 @@ def load_ncert_chemistry_data():
 # Initialize tokenizer for Llama 3.2
 def initialize_tokenizer():
     model_name = "meta-llama/Llama-3.2-3B"
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name) #auto selects the tokenizer for the model
     
-    # Llama tokenizer settings
+#     # Llama tokenizer settings
+#     Some models like LLaMA don’t define a dedicated padding token.
+# Padding tokens are needed when batching sequences of different lengths (so shorter ones align with the longest).avoids runtime errors
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "right"
+    tokenizer.padding_side = "right" #pad at end of the sequnece
     
     return tokenizer
 
@@ -68,11 +70,6 @@ def preprocess_function(examples, tokenizer, max_length=512):
         tokenizer: The tokenizer to use
         max_length: Maximum sequence length (default: 512)
     """
-    # Set padding token if not set
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.padding_side = "right"  # Ensure consistent padding
-
     if "messages" not in examples:
         raise ValueError("Dataset must be chat-format JSONL with a 'messages' field.")
 
@@ -115,13 +112,13 @@ def preprocess_function(examples, tokenizer, max_length=512):
     tokenized = tokenizer(
         texts,
         truncation=True,
-        padding=True,  # Enable padding
+        padding=True,  # Enable padding(model gives output of fixed tokens but this may vary from generated output tokoens, so for model to process consistent tokens we use padding)
         max_length=max_length,
         return_tensors=None,
         add_special_tokens=True,
     )
 
-    # Labels: copy of input ids (can be changed to mask prompts if desired)
+    # Labels: copy of input ids (can be changed to mask prompts if desired) so that loss is only comuted for the generated part
     tokenized["labels"] = [ids.copy() for ids in tokenized.get("input_ids", [])]
     # Remove source_fields as it's not needed for training
     return tokenized
@@ -129,41 +126,41 @@ def preprocess_function(examples, tokenizer, max_length=512):
 def setup_qlora_config():
     """Configure QLoRA for Llama 3.2 3B"""
     lora_config = LoraConfig(
-        r=16,  # LoRA rank
-        lora_alpha=32,  # LoRA alpha
-        target_modules=[
-            "q_proj", "k_proj", "v_proj", "o_proj",
-            "gate_proj", "up_proj", "down_proj",
+        r=16,  # LoRA rank , higher r makes better training but more GPu usgae
+        lora_alpha=32,  # LoRA alpha : scaling factor-> means controls how much Lora layers contribute to final output compared to base model
+        target_modules=[ #which layer in the model Lora will modify
+            "q_proj", "k_proj", "v_proj", "o_proj", #query, key , value and output projection layers in attention mechanism
+            "gate_proj", "up_proj", "down_proj", #feed forward MLP layers
         ],
-        lora_dropout=0.05,
-        bias="none",
-        task_type="CAUSAL_LM",
+        lora_dropout=0.05, #helps prevent overfitting during training by randomly deactivating some Lora connections (0 to 0.1)
+        bias="none", #low cost params-> per output unit scalars (none so that there are not trained)
+        task_type="CAUSAL_LM", 
     )
     return lora_config
 
 def load_model_with_qlora():
     """Load Llama 3.2 3B with QLoRA for 4GB VRAM"""
-    model_name = "meta-llama/Llama-3.2-3B"
+    model_name = "meta-llama/Llama-3.2-3B" 
     
     # Quantization configuration for 4GB VRAM
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_use_double_quant=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
-    )
+        bnb_4bit_compute_dtype=torch.float16, #backward and forward propogation in half precision(good speed accuracxy balancu)
+    ) #quantization configuration for 4-bit quantization 
     
     print("Loading Llama 3.2 3B with 4-bit quantization...")
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         quantization_config=bnb_config,
-        device_map="auto",  # This automatically uses GPU
+        device_map="auto",
         torch_dtype=torch.float16,
         trust_remote_code=True,
     )
     
     # Prepare model for training
-    model = prepare_model_for_kbit_training(model)
+    model = prepare_model_for_kbit_training(model) #only for transformer models 
     
     # Apply LoRA
     lora_config = setup_qlora_config()
@@ -189,6 +186,7 @@ def print_trainable_parameters(model):
 
 class ChemistryLlamaTrainer:
     def __init__(self):
+        #only initialized here
         self.dataset = None
         self.tokenizer = None
         self.model = None
@@ -201,10 +199,10 @@ class ChemistryLlamaTrainer:
         self.dataset = load_ncert_chemistry_data()
         
         print("Initializing tokenizer...")
-        self.tokenizer = initialize_tokenizer()
+        self.tokenizer = initialize_tokenizer() #for llama models
         
         print("Loading Llama 3.2 3B with QLoRA...")
-        self.model = load_model_with_qlora()
+        self.model = load_model_with_qlora() #final model with lora applied
         
         print("Preprocessing data...")
         self._preprocess_data()
@@ -240,8 +238,8 @@ class ChemistryLlamaTrainer:
         training_args = TrainingArguments(
             output_dir="./llama-chemistry-model",
             overwrite_output_dir=True,
-            num_train_epochs=2,  # Reduced for weekend project
-            per_device_train_batch_size=1,  # Essential for 4GB VRAM
+            num_train_epochs=2,   #kept it low to avoid overfitting of adapter layers
+            per_device_train_batch_size=1,  # Essential for 4GB VRAM : no. of sample processign per gpu
             per_device_eval_batch_size=1,
             gradient_accumulation_steps=16,  # Effective batch size = 1 * 16 = 16
             warmup_steps=50,
@@ -259,12 +257,11 @@ class ChemistryLlamaTrainer:
             dataloader_pin_memory=False,
             remove_unused_columns=False,
             gradient_checkpointing=True,  # Save memory
-            report_to=["tensorboard"],
-            optim="paged_adamw_8bit",  # Optimized optimizer for 8-bit
+            optim="paged_adamw_8bit",  # Optimized optimizer for 8-bit from bitsandBytes
         )
         
         # Data collator for language modeling
-        data_collator = DataCollatorForLanguageModeling(
+        data_collator = DataCollatorForLanguageModeling( #task is to process batches for model training. comvert dataset into single padded batch that model can accept
             tokenizer=self.tokenizer,
             mlm=False,
             pad_to_multiple_of=8
